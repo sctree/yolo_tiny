@@ -24,34 +24,31 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 # (edge-triggered) instead of spamming the terminal every frame.
 prev_seen = set()
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        continue
+print("ArUco detector running. Press Ctrl+C to quit.")
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    corners, ids, _ = detector.detectMarkers(gray)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = detector.detectMarkers(gray)
 
-    current_seen = set()
-    if ids is not None:
-        for marker_id in ids.flatten():
-            mid = int(marker_id)
-            current_seen.add(mid)
-            if mid not in prev_seen:
-                label = MARKER_LABELS.get(mid, "(unlabeled)")
-                print(f"Detected marker {mid}: {label}")
+        current_seen = set()
+        if ids is not None:
+            for marker_id in ids.flatten():
+                mid = int(marker_id)
+                current_seen.add(mid)
+                if mid not in prev_seen:
+                    label = MARKER_LABELS.get(mid, "(unlabeled)")
+                    print(f"Detected marker {mid}: {label}")
 
-        aruco.drawDetectedMarkers(frame, corners, ids)
+        for lost in prev_seen - current_seen:
+            label = MARKER_LABELS.get(lost, "(unlabeled)")
+            print(f"Lost marker {lost}: {label}")
 
-    for lost in prev_seen - current_seen:
-        label = MARKER_LABELS.get(lost, "(unlabeled)")
-        print(f"Lost marker {lost}: {label}")
-
-    prev_seen = current_seen
-
-    cv2.imshow("ArUco Detection", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+        prev_seen = current_seen
+except KeyboardInterrupt:
+    print("\nStopping.")
+finally:
+    cap.release()
