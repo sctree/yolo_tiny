@@ -30,8 +30,8 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 CONF_THRESH = 0.5
 NMS_THRESH  = 0.4
 
-# ── Transmission settings (applied AFTER inference) ───────────
-# YOLO runs on the raw frame; only the outgoing image is shrunk/compressed.
+# ── Compression settings (applied BEFORE inference) ───────────
+# Frame is resized + JPEG-roundtripped first, then YOLO runs on the result.
 DISPLAY_SCALE = 0.5   # 640x480 -> 320x240
 JPEG_QUALITY  = 50
 
@@ -39,6 +39,16 @@ while True:
     ret, frame = cap.read()
     if not ret:
         continue
+
+    # ── Compress first: resize + JPEG encode/decode ───────────
+    if DISPLAY_SCALE != 1.0:
+        frame = cv2.resize(
+            frame, None, fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
+            interpolation=cv2.INTER_AREA
+        )
+    _, buf = cv2.imencode(".jpg", frame,
+                          [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+    frame = cv2.imdecode(np.frombuffer(buf, dtype=np.uint8), cv2.IMREAD_COLOR)
 
     h, w = frame.shape[:2]
     blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416),
@@ -80,16 +90,8 @@ while True:
                 "box":        [x, y, bw, bh]
             })
 
-    # ── Downscale + JPEG-encode AFTER inference ───────────────
-    if DISPLAY_SCALE != 1.0:
-        display_frame = cv2.resize(
-            frame, None, fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
-            interpolation=cv2.INTER_AREA
-        )
-    else:
-        display_frame = frame
-
-    _, buf = cv2.imencode(".jpg", display_frame,
+    # ── Encode annotated (already-compressed-size) frame ──────
+    _, buf = cv2.imencode(".jpg", frame,
                           [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     img_b64 = base64.b64encode(buf).decode("utf-8")
 
