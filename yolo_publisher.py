@@ -11,12 +11,12 @@ socket = context.socket(zmq.PUB)
 socket.bind("tcp://0.0.0.0:5555")   # laptop connects to this
 
 # ── Load YOLOv4-tiny ──────────────────────────────────────────
-net = cv2.dnn.readNet("yolov4-tiny.weights", "yolov4-tiny.cfg")
-#net = cv2.dnn.readNet("yolov4-tiny-custom_best.weights", "yolov4-tiny-custom.cfg")
+#net = cv2.dnn.readNet("yolov4-tiny.weights", "yolov4-tiny.cfg")
+net = cv2.dnn.readNet("yolov4-tiny-custom_best.weights", "yolov4-tiny-custom.cfg")
 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
 net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
-with open("coco.names", "r") as f:
+with open("obj.names", "r") as f:
     classes = [line.strip() for line in f.readlines()]
 
 layer_names = net.getLayerNames()
