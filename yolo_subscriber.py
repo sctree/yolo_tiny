@@ -9,6 +9,10 @@ import websockets
 # ── ZeroMQ subscriber ─────────────────────────────────────────
 context = zmq.Context()
 sub = context.socket(zmq.SUB)
+# Keep only the most recent frame so the viewer never lags behind the
+# publisher — older frames are discarded instead of queueing up.
+sub.setsockopt(zmq.CONFLATE, 1)
+sub.setsockopt(zmq.RCVHWM, 1)
 sub.connect("tcp://192.168.0.139:5555")   # ← replace with your Pi's IP
 sub.setsockopt_string(zmq.SUBSCRIBE, "")
 

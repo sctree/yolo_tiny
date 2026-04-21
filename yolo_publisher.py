@@ -11,12 +11,12 @@ socket = context.socket(zmq.PUB)
 socket.bind("tcp://0.0.0.0:5555")   # laptop connects to this
 
 # ── Load YOLOv4-tiny ──────────────────────────────────────────
-#net = cv2.dnn.readNet("yolov4-tiny.weights", "yolov4-tiny.cfg")
-net = cv2.dnn.readNet("yolov4-tiny-custom_best.weights", "yolov4-tiny-custom.cfg")
+net = cv2.dnn.readNet("yolov4-tiny.weights", "yolov4-tiny.cfg")
+#net = cv2.dnn.readNet("yolov4-tiny-custom_best.weights", "yolov4-tiny-custom.cfg")
 net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
 net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
-with open("obj.names", "r") as f:
+with open("coco.names", "r") as f:
     classes = [line.strip() for line in f.readlines()]
 
 layer_names = net.getLayerNames()
@@ -29,6 +29,11 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 CONF_THRESH = 0.5
 NMS_THRESH  = 0.4
+
+# ── Transmission settings (applied AFTER inference) ───────────
+# YOLO runs on the raw frame; only the outgoing image is shrunk/compressed.
+DISPLAY_SCALE = 0.5   # 640x480 -> 320x240
+JPEG_QUALITY  = 50
 
 while True:
     ret, frame = cap.read()
@@ -75,8 +80,17 @@ while True:
                 "box":        [x, y, bw, bh]
             })
 
-    # ── Encode annotated frame as JPEG ────────────────────────
-    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    # ── Downscale + JPEG-encode AFTER inference ───────────────
+    if DISPLAY_SCALE != 1.0:
+        display_frame = cv2.resize(
+            frame, None, fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
+            interpolation=cv2.INTER_AREA
+        )
+    else:
+        display_frame = frame
+
+    _, buf = cv2.imencode(".jpg", display_frame,
+                          [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     img_b64 = base64.b64encode(buf).decode("utf-8")
 
     # ── Publish both on the same socket ───────────────────────
