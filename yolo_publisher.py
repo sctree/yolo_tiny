@@ -1,9 +1,26 @@
 import cv2
+import cv2.aruco as aruco
 import numpy as np
 import zmq
 import json
 import base64
 import time
+
+# -- Robot names
+MARKER_LABELS = {
+    0: "Blinky",
+    1: "Pinky",
+    2: "Inky",
+    3: "Clyde",
+}
+
+# DICT_4X4_50 is a small, easy-to-detect set with plenty of room for 4 IDs.
+# Generate matching markers at https://chev.me/arucogen/ (use the same dict).
+aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+parameters = aruco.DetectorParameters()
+detector   = aruco.ArucoDetector(aruco_dict, parameters)
+
+prev_seen = set()
 
 # ── ZeroMQ setup ──────────────────────────────────────────────
 context = zmq.Context()
@@ -35,71 +52,95 @@ NMS_THRESH  = 0.4
 DISPLAY_SCALE = 0.5   # 640x480 -> 320x240
 JPEG_QUALITY  = 50
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        continue
+try:
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
 
-    # ── Compress first: resize + JPEG encode/decode ───────────
-    if DISPLAY_SCALE != 1.0:
-        frame = cv2.resize(
-            frame, None, fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
-            interpolation=cv2.INTER_AREA
-        )
-    _, buf = cv2.imencode(".jpg", frame,
-                          [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-    frame = cv2.imdecode(np.frombuffer(buf, dtype=np.uint8), cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = detector.detectMarkers(gray)
 
-    h, w = frame.shape[:2]
-    blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416),
-                                  swapRB=True, crop=False)
-    net.setInput(blob)
-    outputs = net.forward(output_layers)
+        current_seen = set()
+        if ids is not None:
+            for marker_id in ids.flatten():
+                mid = int(marker_id)
+                current_seen.add(mid)
+                if mid not in prev_seen:
+                    label = MARKER_LABELS.get(mid, "(unlabeled)")
+                    print(f"Detected marker {mid}: {label}")
 
-    boxes, confidences, class_ids = [], [], []
-    for output in outputs:
-        for det in output:
-            scores = det[5:]
-            cid    = int(np.argmax(scores))
-            conf   = float(scores[cid])
-            if conf < CONF_THRESH:
-                continue
-            cx, cy, bw, bh = (det[0]*w, det[1]*h, det[2]*w, det[3]*h)
-            x = int(cx - bw / 2)
-            y = int(cy - bh / 2)
-            boxes.append([x, y, int(bw), int(bh)])
-            confidences.append(conf)
-            class_ids.append(cid)
+        for lost in prev_seen - current_seen:
+            label = MARKER_LABELS.get(lost, "(unlabeled)")
+            print(f"Lost marker {lost}: {label}")
 
-    indices = cv2.dnn.NMSBoxes(boxes, confidences, CONF_THRESH, NMS_THRESH)
+        prev_seen = current_seen
 
-    detections = []
-    if len(indices) > 0:
-        for i in indices.flatten():
-            x, y, bw, bh = boxes[i]
-            label = classes[class_ids[i]]
-            conf  = confidences[i]
-            # Draw on frame
-            cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0, 255, 0), 2)
-            cv2.putText(frame, f"{label} {conf:.2f}",
-                        (x, y - 8), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.5, (0, 255, 0), 2)
-            detections.append({
-                "label":      label,
-                "confidence": round(conf, 3),
-                "box":        [x, y, bw, bh]
-            })
+        # ── Compress first: resize + JPEG encode/decode ───────────
+        if DISPLAY_SCALE != 1.0:
+            frame = cv2.resize(
+                frame, None, fx=DISPLAY_SCALE, fy=DISPLAY_SCALE,
+                interpolation=cv2.INTER_AREA
+            )
+        _, buf = cv2.imencode(".jpg", frame,
+                            [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+        frame = cv2.imdecode(np.frombuffer(buf, dtype=np.uint8), cv2.IMREAD_COLOR)
 
-    # ── Encode annotated (already-compressed-size) frame ──────
-    _, buf = cv2.imencode(".jpg", frame,
-                          [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
-    img_b64 = base64.b64encode(buf).decode("utf-8")
+        h, w = frame.shape[:2]
+        blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416),
+                                    swapRB=True, crop=False)
+        net.setInput(blob)
+        outputs = net.forward(output_layers)
 
-    # ── Publish both on the same socket ───────────────────────
-    payload = json.dumps({
-        "timestamp":  time.time(),
-        "image_b64":  img_b64,
-        "detections": detections
-    })
-    socket.send_string(payload)
-    print(f"Published {len(detections)} detections")
+        boxes, confidences, class_ids = [], [], []
+        for output in outputs:
+            for det in output:
+                scores = det[5:]
+                cid    = int(np.argmax(scores))
+                conf   = float(scores[cid])
+                if conf < CONF_THRESH:
+                    continue
+                cx, cy, bw, bh = (det[0]*w, det[1]*h, det[2]*w, det[3]*h)
+                x = int(cx - bw / 2)
+                y = int(cy - bh / 2)
+                boxes.append([x, y, int(bw), int(bh)])
+                confidences.append(conf)
+                class_ids.append(cid)
+
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, CONF_THRESH, NMS_THRESH)
+
+        detections = []
+        if len(indices) > 0:
+            for i in indices.flatten():
+                x, y, bw, bh = boxes[i]
+                label = classes[class_ids[i]]
+                conf  = confidences[i]
+                # Draw on frame
+                cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0, 255, 0), 2)
+                cv2.putText(frame, f"{label} {conf:.2f}",
+                            (x, y - 8), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5, (0, 255, 0), 2)
+                detections.append({
+                    "label":      label,
+                    "confidence": round(conf, 3),
+                    "box":        [x, y, bw, bh]
+                })
+
+        # ── Encode annotated (already-compressed-size) frame ──────
+        _, buf = cv2.imencode(".jpg", frame,
+                            [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
+        img_b64 = base64.b64encode(buf).decode("utf-8")
+
+        # ── Publish both on the same socket ───────────────────────
+        payload = json.dumps({
+            "timestamp":  time.time(),
+            "image_b64":  img_b64,
+            "detections": detections
+        })
+        socket.send_string(payload)
+        print(f"Published {len(detections)} detections")
+
+except KeyboardInterrupt:
+    print("\nStopping.")
+finally:
+    cap.release()
