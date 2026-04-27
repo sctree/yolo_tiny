@@ -43,6 +43,9 @@ output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+# Keep the driver's frame queue at 1 so cap.read() returns the freshest
+# frame, not a stale one buffered while we slept.
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 CONF_THRESH = 0.5
 NMS_THRESH  = 0.4
@@ -52,8 +55,14 @@ NMS_THRESH  = 0.4
 DISPLAY_SCALE = 0.5   # 640x480 -> 320x240
 JPEG_QUALITY  = 50
 
+# ── Capture rate limit ────────────────────────────────────────
+TARGET_FPS    = 1.0
+FRAME_PERIOD  = 1.0 / TARGET_FPS
+
 try:
     while True:
+        loop_start = time.time()
+
         ret, frame = cap.read()
         if not ret:
             continue
@@ -139,6 +148,11 @@ try:
         })
         socket.send_string(payload)
         print(f"Published {len(detections)} detections")
+
+        # Sleep just enough to hold the loop to TARGET_FPS.
+        elapsed = time.time() - loop_start
+        if elapsed < FRAME_PERIOD:
+            time.sleep(FRAME_PERIOD - elapsed)
 
 except KeyboardInterrupt:
     print("\nStopping.")

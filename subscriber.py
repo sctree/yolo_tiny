@@ -1,4 +1,3 @@
-import os
 import zmq
 import json
 import base64
@@ -7,19 +6,10 @@ import cv2
 import asyncio
 import websockets
 
-# Only attempt cv2.imshow if a display is actually available.
-# (Headless / SSH-without-X-forwarding sessions have no $DISPLAY.)
-SHOW_LOCAL_WINDOW = bool(os.environ.get("DISPLAY"))
-
 # ── ZeroMQ subscriber ─────────────────────────────────────────
 context = zmq.Context()
 sub = context.socket(zmq.SUB)
-# Keep only the most recent frame so the viewer never lags behind the
-# publisher — older frames are discarded instead of queueing up.
-sub.setsockopt(zmq.CONFLATE, 1)
-sub.setsockopt(zmq.RCVHWM, 1)
 sub.connect("tcp://192.168.0.139:5555")   # ← replace with your Pi's IP
-#sub.connect("tcp://192.168.0.158:5555")   # ← replace with your Pi's IP
 sub.setsockopt_string(zmq.SUBSCRIBE, "")
 
 # ── Foxglove WebSocket clients ────────────────────────────────
@@ -49,21 +39,17 @@ async def broadcast_loop():
             })
             websockets.broadcast(connected_clients, msg)
 
-        # Optional: show locally too (only if we have a display).
-        if SHOW_LOCAL_WINDOW:
-            img_bytes = base64.b64decode(data["image_b64"])
-            img_arr   = np.frombuffer(img_bytes, dtype=np.uint8)
-            frame     = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
-            cv2.imshow("Live Feed", frame)
-            if cv2.waitKey(1) == ord('q'):
-                break
+        # Optional: show locally too
+        img_bytes = base64.b64decode(data["image_b64"])
+        img_arr   = np.frombuffer(img_bytes, dtype=np.uint8)
+        frame     = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+        cv2.imshow("Live Feed", frame)
+        if cv2.waitKey(1) == ord('q'):
+            break
 
 async def main():
     async with websockets.serve(ws_handler, "localhost", 8765):
         print("WebSocket server running on ws://localhost:8765")
-        if not SHOW_LOCAL_WINDOW:
-            print("No $DISPLAY detected — skipping local cv2 window. "
-                  "View the feed via the WebSocket / Foxglove instead.")
         await broadcast_loop()
 
 asyncio.run(main())
